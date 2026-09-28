@@ -1,0 +1,13 @@
+# 가비아 도메인 → GCP VM. Caddy 가 Let's Encrypt 인증서를 자동으로 받고 갱신한다.
+# DOMAIN 은 VM 의 env 파일에서 온다 (예: DOMAIN=haetdeul.co.kr).
+#
+# ★ 인증서 발급은 DNS 의 A 레코드가 이 VM 의 고정 IP 를 가리킨 뒤에야 성공한다.
+
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy frontend:80
+}
+
+www.{$DOMAIN} {
+	redir https://{$DOMAIN}{uri} permanent
+}

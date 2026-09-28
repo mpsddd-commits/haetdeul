@@ -143,7 +143,8 @@ jobs:
   deploy:
     name: Deploy to Windows PC
     needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    # 저장소 Variable DEPLOY_TARGET=gcp 로 바꾸면 이 job 대신 deploy-gcp 가 돈다.
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.DEPLOY_TARGET != 'gcp'
     runs-on: [self-hosted, windows]
     permissions:
       contents: read
@@ -247,3 +248,37 @@ jobs:
           SALES_GEMINI_API_KEY: ${{ secrets.SALES_GEMINI_API_KEY }}
           ML_GEMINI_API_KEY: ${{ secrets.ML_GEMINI_API_KEY }}
           PURCHASE_GEMINI_API_KEY: ${{ secrets.PURCHASE_GEMINI_API_KEY }}
+
+  # ─────────────────────────────────────────────
+  # CD: GCP VM(self-hosted Linux 러너)에서 컨테이너 교체
+  # 저장소 Settings → Variables 에 DEPLOY_TARGET=gcp 가 있을 때만 돈다.
+  # 비밀값은 GitHub Secrets 가 아니라 VM 의 /srv/haetdeul/.env 에 있다.
+  # ─────────────────────────────────────────────
+  deploy-gcp:
+    name: Deploy to GCP VM
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.DEPLOY_TARGET == 'gcp'
+    runs-on: [self-hosted, linux, gcp]
+    permissions:
+      contents: read
+      packages: read
+    concurrency:
+      group: deploy-gcp
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deploy
+        run: bash deploy/gcp/deploy.sh
+        env:
+          BACKEND_IMAGE: ${{ env.BACKEND_IMAGE_NAME }}:${{ github.sha }}
+          FRONTEND_IMAGE: ${{ env.FRONTEND_IMAGE_NAME }}:${{ github.sha }}
+          APP_VERSION: ${{ github.sha }}
