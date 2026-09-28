@@ -1,0 +1,60 @@
+# GCP VM 배포용 덧씌우기 (2026-09-28)
+#
+#   docker compose -f compose.yml -f deploy/gcp/compose.gcp.yml up -d
+#
+# 기존 compose.yml(Windows PC 배포)은 그대로 두고, 여기서 바뀌는 것만 얹는다.
+#   - Caddy 가 80/443 을 받아 HTTPS 를 붙이고 frontend 로 넘긴다
+#   - frontend 는 더 이상 호스트 80 을 쥐지 않는다
+#   - backend 8000 은 VM 안(127.0.0.1)에서만 — 배포 스크립트 헬스체크용
+#   - ML 콘솔 API(ml-backend)가 같은 내부망에 붙는다
+#
+# ★ 상대 경로는 compose.yml 이 있는 저장소 뿌리 기준이다.
+# ★ `!reset`·`!override` 는 Docker Compose v2.24 이상에서 동작한다.
+services:
+  backend:
+    ports: !override
+      - "127.0.0.1:8000:8000"
+
+  frontend:
+    ports: !reset []
+
+  ml-backend:
+    image: ${ML_IMAGE:-ghcr.io/mpsddd-commits/haetdeul-ml:latest}
+    container_name: mainproject-ml-backend
+    environment:
+      # ML 코드는 DATABASE_URL(원천 DB) · TEST_DATABASE_URL(예측 전달표 쪽)을 읽는다.
+      # DB 가 서기 전에는 비어 있어도 컨테이너는 뜬다 — DB 를 쓰는 API 만 503/500.
+      DATABASE_URL: "${ML_DATABASE_URL:-}"
+      TEST_DATABASE_URL: "${ML_TEST_DATABASE_URL:-}"
+      GEMINI_API_KEY: "${ML_GEMINI_API_KEY:-}"
+    volumes:
+      - ml-agent-logs:/app/진행기록/agent_logs
+      # 학습된 모델은 이미지에 없다(gitignore). VM 디스크에 올려 두고 끼운다.
+      - ${ML_MODELS_DIR:-/srv/haetdeul/ml-models}/ops_auc:/app/ML/20260824/ml_train_kit_2/ops_auc
+      - ${ML_MODELS_DIR:-/srv/haetdeul/ml-models}/ops_whsl:/app/ML/20260824/ml_train_kit_2/ops_whsl
+      - ${ML_MODELS_DIR:-/srv/haetdeul/ml-models}/ops_rtl:/app/ML/20260824/ml_train_kit_2/ops_rtl
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    container_name: mainproject-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: "${DOMAIN:?DOMAIN is required (e.g. example.com)}"
+    volumes:
+      - ./deploy/gcp/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - frontend
+    restart: unless-stopped
+
+volumes:
+  ml-agent-logs:
+  # 발급받은 인증서가 여기 남는다. 지우면 재발급을 받는데, Let's Encrypt 는
+  # 같은 도메인 재발급 횟수에 주간 한도가 있다.
+  caddy-data:
+  caddy-config:
